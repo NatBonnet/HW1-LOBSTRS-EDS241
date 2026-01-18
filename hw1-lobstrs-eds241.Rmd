@@ -1,8 +1,8 @@
 ---
 title: "Assignment 1"
 subtitle: "California Spiny Lobster (*Panulirus Interruptus*): Assessing the Impact of Marine Protected Areas (MPAs) at 5 Reef Sites in Santa Barbara County" 
-author: "EDS 241 / ESM 244 (**Due: 1/17**)"
-date: "1/8/26"
+author: "Nathalie Bonnet"
+date: "1/20/26"
 output: 
     html_document:
       theme: flatly
@@ -31,7 +31,7 @@ knitr::opts_chunk$set(eval=FALSE, warning = FALSE, message = FALSE )
 -  Your knitted presentation should meet the quality you'd submit to research colleagues or feel confident sharing publicly. Refer to the rubric for details about presentation standards.
 
 
-**Assignment submission (YOUR NAME):** ______________________________________
+**Assignment submission Nathalie Bonnet:** ______________________________________
 
 
 ----------------------------------------------------------------------
@@ -47,7 +47,8 @@ library(jtools)
 library(gt)
 library(gtsummary)
 library(interactions) 
-
+library(ggridges)
+library(ggbeeswarm)
 ```
 
 ------------------------------------------------------------------------
@@ -77,6 +78,7 @@ Let’s break it down step by step and see what the data reveals! 📊
 
 **a.** Do the control sites (Arroyo Quemado, Carpenteria, and Mohawk) provide a strong counterfactual for our treatment sites (Naples, Isla Vista)? Write a paragraph making a case for why this comparison is ceteris paribus or whether selection bias is likely (be specific!).  
 
+
 ------------------------------------------------------------------------
 
 #### Step 2: Read & wrangle data
@@ -88,7 +90,8 @@ Let’s break it down step by step and see what the data reveals! 📊
 ```{r}
 # HINT: check for coding of missing values (`na = "-99999"`)
 
-rawdata <- 
+# Read in data and correct NAs and column names
+rawdata <- read.csv(here("data", "spiny_abundance_sb_18.csv"), na.strings = c("NA", "-999", "-99999", "-9999")) %>% clean_names()
 
 ```
 
@@ -97,9 +100,19 @@ rawdata <-
     "Arroyo Quemado", "Carpenteria", "Mohawk", "Isla Vista",  "Naples"
 
 ```{r}
-
-tidydata <- 
-    
+# Create a new column with site names and reorder 
+tidydata <- rawdata %>%
+  mutate(
+    reef = factor(
+      case_when(
+        site == "AQUE" ~ "Arroyo Quemado",
+        site == "CARP"  ~ "Carpenteria",
+        site == "MOHK"  ~ "Mohawk",
+        site == "IVEE" ~ "Isla Vista"  ,
+        site == "NAPL"   ~ "Naples"),
+      levels = c("Arroyo Quemado", "Carpenteria", "Mohawk", "Isla Vista",  "Naples")
+    )
+  )
 ```
 
 Create new `df` named `spiny_counts` 
@@ -117,8 +130,20 @@ Create new `df` named `spiny_counts`
 
 #HINT(e): Use `case_when()` to create the 3 new variable columns
 
-spiny_counts <- 
-
+# Create summary counts by site, year, and transect
+spiny_counts <- tidydata %>% 
+    group_by(site, year, transect) %>% 
+    summarize(counts = sum(count), 
+                     mean_size = mean(size_mm, na.rm = TRUE)) %>% 
+    # Encode which sites are MPAs
+    mutate(mpa = case_when(site == "IVEE"~"MPA", 
+                                site == "NAPL"~"MPA", 
+                                site == "AQUE"~"non_MPA", 
+                                site == "CARP"~"non_MPA", 
+                                site == "MOHK"~"non_MPA"),
+                     treat = case_when(mpa == "MPA"~1, 
+                                mpa == "non_MPA"~0))
+    
 ```
 
 > NOTE: This step is crucial to the analysis. Check with a friend or come to TA/instructor office hours to make sure the counts are coded correctly!
@@ -149,10 +174,80 @@ Create a plot of lobster **size** :
 4) You choose the grouping variable(s)!
 
 ```{r}
-# plot 1: ....
+# plot 1: reef site counts
 
-spiny_counts %>% 
-ggplot()
+spiny_counts %>%
+  ggplot(aes(x = site, y = counts, fill = mpa))+
+geom_violin(alpha = 0.4)+
+    geom_boxplot(width = 0.1)+
+    scale_fill_manual(values = c("#22577A", "#FF715B"))+
+    theme_minimal()+
+    labs(title = "Lobster Count by Reef Site", 
+         x = "Site Code", 
+         y = "Count")
+```
+
+```{r}
+#Find mean lobster size for mpas vs. non-mpa
+mean_mpa <- spiny_counts %>% 
+    group_by(mpa) %>% 
+    summarise(mean = mean(mean_size, na.rm = TRUE))
+
+# plot 2: MPA status
+spiny_counts %>%
+  ggplot(aes(x = counts, fill = mpa))+
+geom_histogram(color = "black", 
+               alpha = 0.3) +
+    # Add vertical lines for means
+    geom_vline(xintercept = mean_mpa$mean[[1]], color = "#22577A") +
+    geom_vline(xintercept = mean_mpa$mean[[2]], color = "#FF715B") +
+    # Add MPA annotation
+    annotate(
+  "text",
+  x = (mean_mpa$mean[[1]] + 7),
+  y = 51,
+  label = paste0("Mean = ", round(mean_mpa$mean[[1]], 1)),
+  angle = 90, 
+  size = 2)+
+    # Add non-MPA annotation
+    annotate(
+  "text",
+  x = (mean_mpa$mean[[2]] - 7),
+  y = 51,
+  label = paste0("Mean = ", round(mean_mpa$mean[[2]], 1)),
+  angle = 90, 
+  size = 2
+)+
+    scale_fill_manual(values = c("#22577A", "#FF715B"))+
+    theme_minimal()+
+    labs(title = "Lobster Count by MPA Status", 
+         x = "Number of Lobsters", 
+         y = "Frequency")
+```
+
+```{r}
+# plot 3: year
+spiny_counts %>%
+  ggplot(aes(x = counts, y = factor(year)))+
+geom_density_ridges(fill = "#22577A", alpha = 0.4, quantile_lines = TRUE, 
+                    quantiles = c(0.25, 0.5, 0.75), panel_scaling =  TRUE)+
+    theme_minimal()+
+    labs(title = "Lobster Count by Year with Quantile Lines", 
+         x = "Number of Lobsters", 
+         y = "Year")
+```
+
+```{r}
+# plot 4: size
+spiny_counts %>%
+  ggplot(aes(x = factor(year), y = mean_size, color = mpa))+
+    geom_boxplot()+
+geom_beeswarm(stat = "identity", alpha = 0.7, dodge.width = 0.5) +
+    scale_color_manual(values = c("#22577A", "#FF715B"))+
+    theme_minimal()+
+    labs(title = "Lobster Size by Year", 
+         x = "Year", 
+         y = "Size (mm)")
     
 ```
 
@@ -160,6 +255,36 @@ ggplot()
 
 ```{r}
 # USE: gt_summary::tbl_summary()
+lobster_summary <- spiny_counts %>% 
+    drop_na(mean_size) %>% 
+  gtsummary::tbl_summary(
+    by = mpa, 
+    include = c(mean_size, counts), 
+    statistic = list(all_continuous()~ "{mean} ({sd})")
+  ) %>% 
+    # Add p-val
+    add_p()
+
+# Call gt table and add details
+lobster_summary %>% 
+    as_gt() %>% 
+  # Add a Title and Subtitle
+ tab_header(
+   title = "Santa Barbara Lobster Size and Count", 
+   subtitle = "Comparing MPA vs. non MPA Areas"
+ ) %>% 
+  # Add a Spanner to group the data columns
+tab_spanner(
+  label = "Treatment",
+  columns = c(stat_1, stat_2)
+) %>% 
+  # Change column labels
+cols_label(
+  label = "Variable",
+  p.value = "P-Value", 
+  stat_1 = "MPA", 
+  stat_2 = "non MPA"
+) 
 ```
 
 ------------------------------------------------------------------------
@@ -173,18 +298,20 @@ ggplot()
 ```{r}
 # NOTE: We will not evaluate/interpret model fit in this assignment (e.g., R-square)
 
-m1_ols <- 
+m1_ols <- lm(counts~treat, data = spiny_counts)
 
 summ(m1_ols, model.fit = FALSE) 
 
 ```
+Intercept: Based on the model, in non-MPA sites we would expect to count an average of 23 lobsters per transect. 
+Treat: The model estimates an average of 5 more lobsters per transect in MPA sites than in non-MPA sites. 
 
 **c.** Check the model assumptions using the `check_model` function from the `performance` package
 
 **d.** Explain the results of the 4 diagnostic plots. Why are we getting this result?
 
 ```{r}
-check_model(m1_ols,  check = "qq" )
+check_model(m1_ols, check = "qq" )
 ```
 
 
